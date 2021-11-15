@@ -39,7 +39,7 @@ def mel_spectrogram_from_timeseries(audio_data: LibrosaMonoTimeseries,
         sr = sr_overwrite
     else:
         sr = audio_data.sr
-    mel_spec = librosa.feature.melspectrogram(y=audio_data.timeseries, sr=sr, n_mel=mel_bands)
+    mel_spec = librosa.feature.melspectrogram(y=audio_data.timeseries, sr=sr, n_mels=mel_bands)
     if log_scale:
         mel_spec = librosa.core.power_to_db(mel_spec, ref=np.max)
     return mel_spec
