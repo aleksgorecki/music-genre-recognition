@@ -55,22 +55,15 @@ def pad_timeseries(audio_data: LibrosaMonoTimeseries,
 
 def split_timeseries(audio_data: LibrosaMonoTimeseries,
                      fragment_duration_sec: float,
-                     pad_incomplete: bool = False
                      ) -> typing.List[LibrosaMonoTimeseries]:
     fragment_duration_in_samples = int(fragment_duration_sec * audio_data.sr)
     splits = list()
     for i in range(0, len(audio_data.timeseries), fragment_duration_in_samples):
-        split = np.ndarray(audio_data.timeseries[i:i + fragment_duration_in_samples],
-                           dtype=audio_data.timeseries.dtype)
+        split = np.array(audio_data.timeseries[i:i + fragment_duration_in_samples], dtype=audio_data.timeseries.dtype)
         splits.append(LibrosaMonoTimeseries((split, audio_data.sr)))
 
-    num_fragments = len(splits)
-    if pad_incomplete and fragment_duration_in_samples*num_fragments < len(audio_data.timeseries):
-        incomplete_split = np.ndarray(audio_data.timeseries[fragment_duration_in_samples*num_fragments:],
-                                      dtype=audio_data.timeseries.dtype)
-        padded_split = pad_timeseries(LibrosaMonoTimeseries((incomplete_split, audio_data.sr)),
-                                      fragment_duration_in_samples)
-        splits.append(padded_split)
+    if len(splits[len(splits) - 1].timeseries) < fragment_duration_in_samples:
+        splits.pop()
 
     return splits
 
@@ -81,6 +74,6 @@ def get_fragment_of_timeseries(audio_data: LibrosaMonoTimeseries,
                                ) -> LibrosaMonoTimeseries:
     fragment_duration_in_samples = int(fragment_duration_sec * audio_data.sr)
     offset_in_samples = int(offset_sec * audio_data.sr)
-    fragment = np.ndarray(audio_data.timeseries[offset_in_samples:offset_in_samples + fragment_duration_in_samples],
-                          dtype=audio_data.timeseries.dtype)
+    fragment = np.array(audio_data.timeseries[offset_in_samples:offset_in_samples + fragment_duration_in_samples],
+                        dtype=audio_data.timeseries.dtype)
     return LibrosaMonoTimeseries((fragment, audio_data.sr))
