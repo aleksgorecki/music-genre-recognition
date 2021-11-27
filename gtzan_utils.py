@@ -8,6 +8,9 @@ import pathlib
 from matplotlib import pyplot as plt
 import shutil
 import argparse
+import tqdm
+import random
+import time
 
 
 GTZANLabels = ["blues", "classical", "country", "disco", "hiphop", "jazz", "metal", "pop", "reggae", "rock"]
@@ -47,14 +50,14 @@ def genres_audio_to_mel(genres_dir: str,
         raise Exception
 
     for genre_dir in pathlib.Path(genres_dir).iterdir():
-        print(f"Starting {genre_dir.stem}")
+        print(f"Starting converting genre: {genre_dir.stem}...")
 
-        for audio_file_path in genre_dir.iterdir():
+        for audio_file_path in tqdm.tqdm(genre_dir.iterdir()):
 
             try:
                 audio_data = audio_processing.load_to_mono(str(audio_file_path), sr_overwrite)
             except (RuntimeError, audioread.exceptions.NoBackendError):
-                print(f"File {audio_file_path.stem} was skipped because it couldnt be loaded and may be corrupted")
+                print(f"(!) File {audio_file_path.stem} was skipped because it couldnt be loaded and may be corrupted.")
                 continue
 
             genre_target_dir = pathlib.Path(dest_dir).joinpath(genre_dir.stem)
@@ -78,15 +81,16 @@ def genres_audio_to_mel(genres_dir: str,
                 fig.savefig(fname=mel_save_filename, bbox_inches="tight", pad_inches=0.0)
             if dest_dir is None:
                 os.remove(audio_file_path)
-            print(f"Done {audio_file_path.stem}")
 
 
-def split_dataset_audio(dest_dir: str,
-                        clear_existing_dest: bool = True,
-                        train_ratio: float = 0.70,
-                        test_ratio: float = 0.20,
-                        val_ratio: float = 0.10
-                        ) -> None:
+def split_dataset(dest_dir: str,
+                  clear_existing_dest: bool = True,
+                  shuffle: bool = True,
+                  seed: int = None,
+                  train_ratio: float = 0.70,
+                  test_ratio: float = 0.20,
+                  val_ratio: float = 0.10
+                  ) -> None:
 
     if round(train_ratio + test_ratio + val_ratio, ndigits=1) != 1.0:
         raise ValueError
@@ -94,19 +98,49 @@ def split_dataset_audio(dest_dir: str,
     if not prepare_destination_dir(dest_dir, clear_existing_dest):
         raise Exception
 
+    os.makedirs(dest_dir, exist_ok=True)
+
+    dest_dir_path = pathlib.Path(dest_dir)
+
+    files_to_split = list(dest_dir_path.iterdir())
+    if shuffle:
+        if seed is not None:
+            gen = random.Random(seed)
+        else:
+            gen = random.Random()
+        gen.shuffle(files_to_split)
+
+    num_all_files = len(files_to_split)
+    num_train_files = int(train_ratio * num_all_files)
+    num_test_files = int(test_ratio * num_all_files)
+    num_val_files = int(val_ratio * num_all_files)
+
+    print(f"Missing files: {num_all_files - (num_val_files + num_train_files + num_test_files)}")
+
+    train_files = files_to_split[0:num_train_files]
+    test_files = files_to_split[num_train_files:num_test_files]
+    val_files = files_to_split[num_test_files:num_val_files]
+
+    splits = [train_files, test_files, val_files]
+    splits_dir_names = ['train', 'test', 'val']
+
+    for idx, split in enumerate(splits):
+        split_dir_name = splits_dir_names[idx]
+        print(f"Copying {split_dir_name} files...")
+        for file in tqdm.tqdm(split):
+            shutil.copy(file, dest_dir_path.joinpath(split_dir_name))
+            if dest_dir is None:
+                os.remove(file)
 
 
 
 if __name__ == "__main__":
     DEFAULT_SPLIT_DEST = "/home/aleksy/gtzan_split/"
     DEFAULT_MEL_DEST = "/home/aleksy/gtzan_mel/"
-    DEFAULT_SPLIT_DURATION = 5
-
+    DEFAULT_SPLIT_DURATION = 5.0
 
     parser = argparse.ArgumentParser()
+    parser.add_argument()
 
-    genres_audio_to_mel(
-        genre_dir="/home/aleksy/dev/datasets/gtzan",
-        dest_dir="/home/aleksy/gtzan_spec_test2",
-        split_duration=5.0
-    )
+    split_dataset()
+    genres_audio_to_mel()
