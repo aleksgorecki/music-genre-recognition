@@ -17,11 +17,12 @@ class LibrosaMonoTimeseries:
         self.sr = librosa_timeseries_tuple[1]
 
 
-def load_audio_file_and_convert_to_mono(file_path: str,
-                                        sr_overwrite: typing.Optional[int] = None,
-                                        offset_sec: float = 0.0,
-                                        duration: float = None
-                                        ) -> LibrosaMonoTimeseries:
+def load_to_mono(file_path: str,
+                 sr_overwrite: typing.Optional[int] = None,
+                 offset_sec: float = 0.0,
+                 duration: float = None
+                 ) -> LibrosaMonoTimeseries:
+
     if sr_overwrite is not None:
         sr = sr_overwrite
     else:
@@ -30,11 +31,12 @@ def load_audio_file_and_convert_to_mono(file_path: str,
     return LibrosaMonoTimeseries(audio_data)
 
 
-def mel_spectrogram_from_timeseries(audio_data: LibrosaMonoTimeseries,
-                                    mel_bands: int = 128,
-                                    sr_overwrite: typing.Optional[int] = None,
-                                    log_scale: bool = True
-                                    ) -> typing.Any:
+def mel_from_timeseries(audio_data: LibrosaMonoTimeseries,
+                        mel_bands: int = 128,
+                        sr_overwrite: typing.Optional[int] = None,
+                        log_scale: bool = True
+                        ) -> typing.Any:
+
     if sr_overwrite is not None:
         sr = sr_overwrite
     else:
@@ -45,25 +47,24 @@ def mel_spectrogram_from_timeseries(audio_data: LibrosaMonoTimeseries,
     return mel_spec
 
 
-def pad_timeseries(audio_data: LibrosaMonoTimeseries,
-                   target_length: int,
-                   ) -> LibrosaMonoTimeseries:
-    num_samples_to_add = int(target_length - len(audio_data.timeseries))
-    padded_timeseries = np.pad(audio_data.timeseries, (0, num_samples_to_add))
-    return LibrosaMonoTimeseries((padded_timeseries, audio_data.sr))
-
-
 def split_timeseries(audio_data: LibrosaMonoTimeseries,
                      fragment_duration_sec: float,
                      ) -> typing.List[LibrosaMonoTimeseries]:
-    fragment_duration_in_samples = int(fragment_duration_sec * audio_data.sr)
-    splits = list()
-    for i in range(0, len(audio_data.timeseries), fragment_duration_in_samples):
-        split = np.array(audio_data.timeseries[i:i + fragment_duration_in_samples], dtype=audio_data.timeseries.dtype)
-        splits.append(LibrosaMonoTimeseries((split, audio_data.sr)))
 
-    if len(splits[len(splits) - 1].timeseries) < fragment_duration_in_samples:
-        splits.pop()
+    fragment_duration_in_samples = int(fragment_duration_sec * audio_data.sr)
+
+    split_points_indices = list(range(fragment_duration_in_samples,
+                                      len(audio_data.timeseries),
+                                      fragment_duration_in_samples)
+                                )
+
+    timeseries_splits = np.split(audio_data.timeseries, indices_or_sections=split_points_indices)
+    if len(timeseries_splits[-1]) != fragment_duration_in_samples:
+        timeseries_splits.pop()
+
+    splits = list()
+    for split in timeseries_splits:
+        splits.append(LibrosaMonoTimeseries((split, audio_data.sr)))
 
     return splits
 
@@ -72,8 +73,10 @@ def get_fragment_of_timeseries(audio_data: LibrosaMonoTimeseries,
                                offset_sec: float,
                                fragment_duration_sec: float
                                ) -> LibrosaMonoTimeseries:
+
     fragment_duration_in_samples = int(fragment_duration_sec * audio_data.sr)
     offset_in_samples = int(offset_sec * audio_data.sr)
     fragment = np.array(audio_data.timeseries[offset_in_samples:offset_in_samples + fragment_duration_in_samples],
                         dtype=audio_data.timeseries.dtype)
+
     return LibrosaMonoTimeseries((fragment, audio_data.sr))

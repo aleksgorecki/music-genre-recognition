@@ -5,12 +5,10 @@ import typing
 import librosa.display
 
 
-def spec_to_img(spec_data: typing.Any) -> np.typing.ArrayLike:
-    fig, ax = plt.subplots()
-    librosa.display.specshow(spec_data, ax=ax)
-    ax.axis('off')
-    ax.imshow(spec_data)
-    return fig
+def mel_only_on_ax(mel: typing.Any, ax: plt.Axes) -> None:
+    ax.clear()
+    ax.axis("off")
+    librosa.display.specshow(mel, ax=ax)
 
 
 def spec_to_plot(spec_data: typing.Any) -> np.typing.ArrayLike:
