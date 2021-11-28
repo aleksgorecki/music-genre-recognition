@@ -1,3 +1,5 @@
+import typing
+
 import audio_processing
 import plot_visuals
 
@@ -11,9 +13,48 @@ import argparse
 import tqdm
 import random
 import time
+from dataclasses import dataclass
 
 
 GTZANLabels = ["blues", "classical", "country", "disco", "hiphop", "jazz", "metal", "pop", "reggae", "rock"]
+
+
+@dataclass
+class DatasetSplitDict:
+    split_dict: typing.Dict[str, typing.Dict[str, typing.List[pathlib.Path]]]
+    splits_names = ["train", "test", "val"]
+
+    def __init__(self, original_genres_path: str = None):
+        self.split_dict = {
+            "train": {},
+            "test": {},
+            "val": {}
+        }
+        self.original_genres_path = original_genres_path
+
+    def add_genre_record(self, genre_name: str, record: typing.Dict[str, typing.List[pathlib.Path]]) -> None:
+        assert(sorted(DatasetSplitDict.splits_names) == sorted(list(record.keys())))
+
+        for split in DatasetSplitDict.splits_names:
+            self.split_dict[split].update(
+                {genre_name: record[split]}
+            )
+
+    # def add_genre_record(self, genre: str, other: "DatasetSplitDict"):
+    #     assert(genre in other.split_dict["train"].keys()
+    #            and genre in other.split_dict["test"].keys()
+    #            and genre in other.split_dict["val"].keys()
+    #            )
+    #
+    #     assert(genre not in self.split_dict["train"].keys()
+    #            and genre not in self.split_dict["test"].keys()
+    #            and genre not in self.split_dict["test"].keys()
+    #            )
+    #
+    #     for split in ["train", "test", "val"]:
+    #         self.split_dict[split].update(
+    #             {genre: other.split_dict[split][genre]}
+    #         )
 
 
 def prepare_destination_dir(dest: str, clear_existing_dest: bool) -> bool:
@@ -29,9 +70,87 @@ def prepare_destination_dir(dest: str, clear_existing_dest: bool) -> bool:
         if len(os.listdir(dest_path)) != 0 and not clear_existing_dest:
             return False
         shutil.rmtree(dest_path)
+    os.makedirs(dest_path)
+    return True
+
+
+def ratio_to_rounded_ids(ratio: typing.Tuple[float, float, float], whole_dir_num: int) -> typing.Tuple[int, int, int]:
+    num_train_files = int(ratio[0] * whole_dir_num)
+    num_test_files = int(ratio[1] * whole_dir_num)
+    num_val_files = int(ratio[2] * whole_dir_num)
+
+    unassigned_files = whole_dir_num - (num_val_files + num_train_files + num_test_files)
+
+    if unassigned_files == 1:
+        num_train_files += 1
+    elif unassigned_files == 2:
+        num_train_files += 1
+        num_test_files += 1
+
+    train_idx = num_train_files
+    test_idx = num_train_files + num_test_files
+    val_idx = num_train_files + num_test_files + num_val_files
+
+    return train_idx, test_idx, val_idx
+
+
+def shuffle_file_list(fl: typing.List[pathlib.Path], seed: typing.Any = None):
+    if seed is not None:
+        gen = random.Random(seed)
     else:
-        os.makedirs(dest_path)
-        return True
+        gen = random.Random()
+    shuffled = fl.copy()
+    gen.shuffle(shuffled)
+    return shuffled
+
+
+def get_splits_for_genre(genre_dir: str,
+                         shuffle: bool = True,
+                         seed: int = None,
+                         train_ratio: float = 0.70,
+                         test_ratio: float = 0.20,
+                         val_ratio: float = 0.10
+                         ) -> typing.Dict[str, typing.List[pathlib.Path]]:
+
+    assert(round(train_ratio + test_ratio + val_ratio) == 1)
+
+    genres_dir_path = pathlib.Path(genre_dir)
+    files_to_split = list(genres_dir_path.iterdir())
+    if shuffle:
+        files_to_split = shuffle_file_list(files_to_split, seed)
+
+    train_idx, test_idx, val_idx = ratio_to_rounded_ids((train_ratio, test_ratio, val_ratio), len(files_to_split))
+
+    files = {
+        "train": files_to_split[:train_idx],
+        "test": files_to_split[train_idx:test_idx],
+        "val": files_to_split[test_idx:]
+    }
+
+    return files
+
+
+def get_splits_for_dataset(genres_dir: str,
+                           shuffle: bool = True,
+                           seed: int = None,
+                           train_ratio: float = 0.70,
+                           test_ratio: float = 0.20,
+                           val_ratio: float = 0.10
+                           ) -> DatasetSplitDict:
+
+    dataset_split_dict = DatasetSplitDict()
+    for genre_dir in pathlib.Path(genres_dir).iterdir():
+        genre_split = get_splits_for_genre(genre_dir, shuffle, seed, train_ratio, test_ratio, val_ratio)
+        dataset_split_dict.add_genre_record(genre_dir.stem, genre_split)
+    return dataset_split_dict
+
+
+def genre_to_mel():
+    pass
+
+
+def split_to_mel():
+    pass
 
 
 def genres_audio_to_mel(genres_dir: str,
@@ -82,65 +201,24 @@ def genres_audio_to_mel(genres_dir: str,
             if dest_dir is None:
                 os.remove(audio_file_path)
 
-
-def split_dataset(dest_dir: str,
-                  clear_existing_dest: bool = True,
-                  shuffle: bool = True,
-                  seed: int = None,
-                  train_ratio: float = 0.70,
-                  test_ratio: float = 0.20,
-                  val_ratio: float = 0.10
-                  ) -> None:
-
-    if round(train_ratio + test_ratio + val_ratio, ndigits=1) != 1.0:
-        raise ValueError
-
-    if not prepare_destination_dir(dest_dir, clear_existing_dest):
-        raise Exception
-
-    os.makedirs(dest_dir, exist_ok=True)
-
-    dest_dir_path = pathlib.Path(dest_dir)
-
-    files_to_split = list(dest_dir_path.iterdir())
-    if shuffle:
-        if seed is not None:
-            gen = random.Random(seed)
-        else:
-            gen = random.Random()
-        gen.shuffle(files_to_split)
-
-    num_all_files = len(files_to_split)
-    num_train_files = int(train_ratio * num_all_files)
-    num_test_files = int(test_ratio * num_all_files)
-    num_val_files = int(val_ratio * num_all_files)
-
-    print(f"Missing files: {num_all_files - (num_val_files + num_train_files + num_test_files)}")
-
-    train_files = files_to_split[0:num_train_files]
-    test_files = files_to_split[num_train_files:num_test_files]
-    val_files = files_to_split[num_test_files:num_val_files]
-
-    splits = [train_files, test_files, val_files]
-    splits_dir_names = ['train', 'test', 'val']
-
-    for idx, split in enumerate(splits):
-        split_dir_name = splits_dir_names[idx]
-        print(f"Copying {split_dir_name} files...")
-        for file in tqdm.tqdm(split):
-            shutil.copy(file, dest_dir_path.joinpath(split_dir_name))
-            if dest_dir is None:
-                os.remove(file)
+def save_split_to_dir_original():
+    pass
 
 
+def save_split_to_dir_as_mels():
+    pass
 
 if __name__ == "__main__":
-    DEFAULT_SPLIT_DEST = "/home/aleksy/gtzan_split/"
-    DEFAULT_MEL_DEST = "/home/aleksy/gtzan_mel/"
-    DEFAULT_SPLIT_DURATION = 5.0
+    # DEFAULT_SPLIT_DEST = "/home/aleksy/gtzan_split/"
+    # DEFAULT_MEL_DEST = "/home/aleksy/gtzan_mel/"
+    # DEFAULT_SPLIT_DURATION = 5.0
+    #
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument()
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument()
+    get_splits_for_genre(
+        genre_dir="/home/aleksy/genres_original/blues"
 
-    split_dataset()
-    genres_audio_to_mel()
+    )
+    get_splits_for_dataset("/home/aleksy/genres_original")
+    # genres_audio_to_mel()
