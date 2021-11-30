@@ -13,6 +13,7 @@ import argparse
 import random
 from dataclasses import dataclass
 import numpy as np
+import pandas as pd
 
 
 GTZANLabels = ["blues", "classical", "country", "disco", "hiphop", "jazz", "metal", "pop", "reggae", "rock"]
@@ -38,6 +39,14 @@ class DatasetSplitDict:
             self.split_dict[split].update(
                 {genre_name: record[split]}
             )
+
+    def to_pandas_dataframes(self) -> typing.Dict[str, pd.DataFrame]:
+        splits_dataframes = dict()
+        for split in self.split_dict.keys():
+            split_dataframe = pd.DataFrame.from_dict(data=self.split_dict[split])
+            splits_dataframes.update({split: split_dataframe})
+
+        return splits_dataframes
 
 
 def ratio_to_rounded_indices(ratio: typing.Tuple[float, float, float],
@@ -177,7 +186,7 @@ def save_single_split_as_mels(split: typing.Dict["str", typing.List[pathlib.Path
                 )
                 fig.savefig(fname=mel_save_filename, bbox_inches="tight", pad_inches=0.0, dpi=dpi)
 
-            print(f"Current state: Done {split_name}: {genre_name}: {source_file.stem}", flush=True)
+            print(f"\rCurrent state: {split_name}: {genre_name}: {source_file.stem}", end="")
 
 
 def save_splits_as_mels(dataset_splits: DatasetSplitDict,
@@ -210,55 +219,6 @@ def save_splits_as_mels(dataset_splits: DatasetSplitDict,
     print("Saved.")
 
 
-# def genres_audio_to_mel(genres_dir: str,
-#                         dest_dir: str,
-#                         clear_dest: bool = True,
-#                         mel_bands: int = 128,
-#                         sr_overwrite: int = None,
-#                         split_duration: float = None,
-#                         spec_log_scale: bool = True,
-#                         ) -> None:
-#
-#     fig, ax = plt.subplots()
-#     plt.close(fig)
-#
-#     if not validate_destination_dir(dest_dir, clear_dest):
-#         raise Exception
-#
-#     for genre_dir in pathlib.Path(genres_dir).iterdir():
-#         print(f"Starting converting genre: {genre_dir.stem}...")
-#
-#         for audio_file_path in tqdm.tqdm(genre_dir.iterdir()):
-#
-#             try:
-#                 audio_data = audio_processing.load_to_mono(str(audio_file_path), sr_overwrite)
-#             except (RuntimeError, audioread.exceptions.NoBackendError):
-#                 print(f"(!) File {audio_file_path.stem} was skipped because it couldnt be loaded and may be corrupted.")
-#                 continue
-#
-#             genre_target_dir = pathlib.Path(dest_dir).joinpath(genre_dir.stem)
-#             os.makedirs(genre_target_dir, exist_ok=True)
-#
-#             mels_to_save = list()
-#             if split_duration is not None:
-#                 splits = audio_processing.split_timeseries(audio_data, fragment_duration_sec=split_duration)
-#                 mels_to_save = [
-#                     audio_processing.mel_from_timeseries(x, mel_bands, sr_overwrite, spec_log_scale)
-#                     for x in splits
-#                 ]
-#             else:
-#                 mel = audio_processing.mel_from_timeseries(audio_data, mel_bands,
-#                                                            sr_overwrite, log_scale=spec_log_scale)
-#                 mels_to_save.append(mel)
-#
-#             for part_num, mel in enumerate(mels_to_save):
-#                 plot_visuals.mel_only_on_ax(mel, ax)
-#                 mel_save_filename = pathlib.Path(genre_target_dir).joinpath(f"{audio_file_path.stem}_part{part_num}.png")
-#                 fig.savefig(fname=mel_save_filename, bbox_inches="tight", pad_inches=0.0)
-#             if dest_dir is None:
-#                 os.remove(audio_file_path)
-
-
 if __name__ == "__main__":
     # DEFAULT_SPLIT_DEST = "/home/aleksy/gtzan_split/"
     # DEFAULT_MEL_DEST = "/home/aleksy/gtzan_mel/"
@@ -270,4 +230,5 @@ if __name__ == "__main__":
     main_split_dict = get_splits_for_dataset(
         genres_dir="/home/aleksy/dev/datasets/gtzan/Data/genres_original"
     )
-    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_spec_2", split_duration=5.0)
+    main_split_dict.to_pandas_dataframes()
+    #save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_spec_3", split_duration=5.0)
