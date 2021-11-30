@@ -1,8 +1,11 @@
+import os
 import typing
 
 import pandas as pd
 import pathlib
 import shutil
+import warnings
+import librosa
 
 
 import gtzan_utils
@@ -46,7 +49,7 @@ def unnest_files_to_directory(fma_small_dir: str, dest_dir: str, clear_dest: boo
             shutil.copy(file, dest_path)
 
 
-def dataframe_pairing_to_genre_dict(genre_filepath_pairing: pd.DataFrame) -> typing.Dict[str, typing.List[int]]:
+def dataframe_pairing_to_genre_dict(genre_filepath_pairing: pd.DataFrame) -> typing.Dict[str, typing.List[str]]:
     genres_names = genre_filepath_pairing.iloc[:, 1].unique()
     genre_dict = dict()
     for genre in genres_names:
@@ -67,11 +70,27 @@ def get_filepath_to_top_genre_assignment(genre_id_pairing: pd.DataFrame, fma_sma
     return new_pairing
 
 
+def save_to_dir_in_gtzan_format(genre_dict: typing.Dict[str, typing.List[str]], dest_dir: str, clear_dest: bool = True):
+
+    gtzan_utils.validate_destination_dir(dest_dir, clear_dest)
+
+    dest_path = pathlib.Path(dest_dir)
+
+    for genre in genre_dict.keys():
+        genre_dir = dest_path.joinpath(genre)
+        os.makedirs(genre_dir)
+        for filepath in genre_dict[genre]:
+            shutil.copy(filepath, genre_dir)
+
+
+
 if __name__ == "__main__":
     df = get_track_id_and_top_genre_pairing("/home/aleksy/dev/datasets/fma_metadata/tracks.csv")
     dff = get_filepath_to_top_genre_assignment(df, "/home/aleksy/dev/datasets/fma_small")
     d = dataframe_pairing_to_genre_dict(genre_filepath_pairing=dff)
-
-    #df2 = get_filepath_to_top_genre_assignment(df, "/home/aleksy/dev/datasets/fma_small")
-    #unnest_files_to_directory("/home/aleksy/dev/datasets/fma_small", "/home/aleksy/fma_unnested")
-    pass
+    save_to_dir_in_gtzan_format(d, "/home/aleksy/fma_gtzanlike")
+    main_split_dict = gtzan_utils.get_splits_for_dataset(
+        genres_dir="/home/aleksy/fma_gtzanlike"
+    )
+    warnings.filterwarnings(category=UserWarning, action="ignore")
+    gtzan_utils.save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/fma_gtzanlike_spec", split_duration=5.0)

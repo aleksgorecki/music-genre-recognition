@@ -164,11 +164,14 @@ def save_single_split_as_mels(split: typing.Dict["str", typing.List[pathlib.Path
             try:
                 audio_data = audio_processing.load_to_mono(str(source_file), sr_overwrite)
             except (RuntimeError, audioread.exceptions.NoBackendError):
-                print(f"(!) File {source_file.stem} was skipped because it couldnt be loaded and may be corrupted.")
+                print(f"\n(!) File {source_file.stem} was skipped because it couldnt be loaded and may be corrupted.")
                 continue
 
             mels_to_save = list()
             if split_duration is not None:
+                if split_duration > len(audio_data.timeseries)*audio_data.sr:
+                    print(f"\n(!) File {source_file.stem} was skipped because it was shorter than the fragment length.")
+                    continue
                 splits = audio_processing.split_timeseries(audio_data, fragment_duration_sec=split_duration)
                 mels_to_save = [
                     audio_processing.mel_from_timeseries(x, mel_bands, sr_overwrite, spec_log_scale)
@@ -230,5 +233,5 @@ if __name__ == "__main__":
     main_split_dict = get_splits_for_dataset(
         genres_dir="/home/aleksy/dev/datasets/gtzan/Data/genres_original"
     )
-    main_split_dict.to_pandas_dataframes()
-    #save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_spec_3", split_duration=5.0)
+    #main_split_dict.to_pandas_dataframes()
+    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_spec_dpi100_mel256", split_duration=5.0, mel_bands=256)
