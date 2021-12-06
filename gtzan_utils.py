@@ -1,7 +1,8 @@
+import json
 import typing
 
 import audio_processing
-import plot_visuals
+import visual
 
 
 import audioread.exceptions
@@ -9,11 +10,11 @@ import os
 import pathlib
 from matplotlib import pyplot as plt
 import shutil
-import argparse
 import random
 from dataclasses import dataclass
 import numpy as np
 import pandas as pd
+import datetime
 
 
 GTZANLabels = ["blues", "classical", "country", "disco", "hiphop", "jazz", "metal", "pop", "reggae", "rock"]
@@ -79,7 +80,7 @@ def shuffle_file_list(fl: typing.List[pathlib.Path], seed: typing.Any = None) ->
     if seed is not None:
         gen = random.Random(seed)
     else:
-        gen = random.Random()
+        gen = random.Random(datetime.datetime.now())
     shuffled = fl.copy()
     gen.shuffle(shuffled)
     return shuffled
@@ -147,6 +148,8 @@ def save_single_split_as_mels(split: typing.Dict["str", typing.List[pathlib.Path
                               sr_overwrite: int = None,
                               split_duration: float = None,
                               spec_log_scale: bool = True,
+                              cut_fragment: bool = False,
+                              overlap_ratio: float = 0.50,
                               dpi: int = 100
                               ) -> None:
 
@@ -172,18 +175,29 @@ def save_single_split_as_mels(split: typing.Dict["str", typing.List[pathlib.Path
                 if split_duration > len(audio_data.timeseries)*audio_data.sr:
                     print(f"\n(!) File {source_file.stem} was skipped because it was shorter than the fragment length.")
                     continue
-                splits = audio_processing.split_timeseries(audio_data, fragment_duration_sec=split_duration)
-                mels_to_save = [
-                    audio_processing.mel_from_timeseries(x, mel_bands, sr_overwrite, spec_log_scale)
-                    for x in splits
-                ]
+                if cut_fragment:
+                    fragment = audio_processing.get_fragment_of_timeseries(audio_data,
+                                                                           len(audio_data.timeseries)/audio_data.sr*0.5,
+                                                                           split_duration
+                                                                           )
+                    mel = audio_processing.mel_from_timeseries(fragment, mel_bands,
+                                                               sr_overwrite, log_scale=spec_log_scale)
+                    mels_to_save.append(mel)
+                else:
+                    splits = audio_processing.split_timeseries(audio_data, split_duration, overlap_ratio)
+                    if len(splits) == 0:
+                        continue
+                    mels_to_save = [
+                        audio_processing.mel_from_timeseries(x, mel_bands, sr_overwrite, spec_log_scale)
+                        for x in splits
+                    ]
             else:
                 mel = audio_processing.mel_from_timeseries(audio_data, mel_bands,
                                                            sr_overwrite, log_scale=spec_log_scale)
                 mels_to_save.append(mel)
 
             for part_num, mel in enumerate(mels_to_save):
-                plot_visuals.mel_only_on_ax(mel, ax)
+                visual.mel_only_on_ax(mel, ax)
                 mel_save_filename = pathlib.Path(genre_destination_dir).joinpath(
                     f"{source_file.stem}_part{part_num}.png"
                 )
@@ -198,8 +212,11 @@ def save_splits_as_mels(dataset_splits: DatasetSplitDict,
                         mel_bands: int = 128,
                         sr_overwrite: int = None,
                         split_duration: float = None,
+                        cut_fragment: bool = False,
                         spec_log_scale: bool = True,
-                        dpi: int = 100
+                        overlap_ratio: float = 0.50,
+                        dpi: int = 100,
+                        use_multiprocessing: bool = False
                         ) -> None:
 
     assert(len(dataset_splits.split_dict.keys()) > 0)
@@ -207,19 +224,88 @@ def save_splits_as_mels(dataset_splits: DatasetSplitDict,
     if not validate_destination_dir(destination_dir, clear_dest):
         raise Exception
 
-    for split_name in dataset_splits.split_dict.keys():
-        os.makedirs(pathlib.Path(destination_dir).joinpath(split_name))
-        save_single_split_as_mels(dataset_splits.split_dict[split_name],
-                                  split_name,
-                                  destination_dir,
-                                  mel_bands,
-                                  sr_overwrite,
-                                  split_duration,
-                                  spec_log_scale,
-                                  dpi
-                                  )
+    if use_multiprocessing:
+        raise NotImplementedError
+    else:
+        for split_name in dataset_splits.split_dict.keys():
+            os.makedirs(pathlib.Path(destination_dir).joinpath(split_name))
+            save_single_split_as_mels(dataset_splits.split_dict[split_name],
+                                      split_name,
+                                      destination_dir,
+                                      mel_bands,
+                                      sr_overwrite,
+                                      split_duration,
+                                      spec_log_scale,
+                                      cut_fragment,
+                                      overlap_ratio,
+                                      dpi
+                                      )
 
     print("Saved.")
+
+
+def shuffle_mix_song_parts(splitted_dataset_dir: str,
+                           destination_dir: str,
+                           clear_dest: bool = True,
+                           shuffle: bool = True,
+                           seed: int = None,
+                           train_ratio: float = 0.70,
+                           test_ratio: float = 0.20,
+                           val_ratio: float = 0.10
+                           ) -> None:
+
+    if not validate_destination_dir(destination_dir, clear_dest):
+        raise Exception
+
+    virtual_dir_dict = dict()
+    for split in pathlib.Path(splitted_dataset_dir).iterdir():
+        for genre_dir in split.iterdir():
+            for file in genre_dir.iterdir():
+                if genre_dir.stem in virtual_dir_dict.keys():
+                    virtual_dir_dict[genre_dir.stem].append(file)
+                else:
+                    virtual_dir_dict.update({genre_dir.stem: [file]})
+
+    virtual_dataset_split_dict = DatasetSplitDict()
+    for genre in virtual_dir_dict.keys():
+        files_to_split = virtual_dir_dict[genre]
+        if shuffle:
+            files_to_split = shuffle_file_list(files_to_split, seed)
+
+        train_idx, test_idx, val_idx = ratio_to_rounded_indices((train_ratio, test_ratio, val_ratio), len(files_to_split))
+
+        files = {
+            "train": files_to_split[:train_idx],
+            "test": files_to_split[train_idx:test_idx],
+            "val": files_to_split[test_idx:]
+        }
+
+        virtual_dataset_split_dict.add_genre_record(genre, files)
+
+    for split in virtual_dataset_split_dict.split_dict.keys():
+        split_path = pathlib.Path(destination_dir).joinpath(split)
+        os.makedirs(split_path)
+
+        for genre in virtual_dataset_split_dict.split_dict[split].keys():
+            genre_path = split_path.joinpath(genre)
+            os.makedirs(genre_path)
+
+            for file in virtual_dataset_split_dict.split_dict[split][genre]:
+                shutil.copy(file, genre_path)
+
+
+def labels_to_file(split_dir: str):
+    split_path = pathlib.Path(split_dir)
+
+    labels = [sorted(os.listdir(split_path))]
+
+    label_int_mapping = dict()
+
+    for l_idx, label in enumerate(labels):
+        label_int_mapping.update({l_idx: label})
+
+    with open(split_path.joinpath("labels.json"), "w+") as f:
+        json.dump(obj=label_int_mapping, fp=f)
 
 
 if __name__ == "__main__":
@@ -231,7 +317,14 @@ if __name__ == "__main__":
     # parser.add_argument()
 
     main_split_dict = get_splits_for_dataset(
-        genres_dir="/home/aleksy/dev/datasets/gtzan/Data/genres_original"
+        genres_dir="/home/aleksy/dev/datasets/gtzan_fixed/Data/genres_original",
+        seed=datetime.datetime.now()
     )
     #main_split_dict.to_pandas_dataframes()
-    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_spec_dpi100_mel256", split_duration=5.0, mel_bands=256)
+
+    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512", split_duration=5.0, mel_bands=512, overlap_ratio=0.50)
+    shuffle_mix_song_parts("/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512", "/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512_mixed")
+
+    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512", split_duration=5.0, mel_bands=512, overlap_ratio=0.70)
+    shuffle_mix_song_parts("/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512", "/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512_mixed")
+

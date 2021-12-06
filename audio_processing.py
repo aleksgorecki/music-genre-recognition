@@ -3,6 +3,8 @@ import numpy.typing
 import typing
 import librosa
 import librosa.core
+import audiofile
+import os
 from dataclasses import dataclass
 
 
@@ -49,18 +51,28 @@ def mel_from_timeseries(audio_data: LibrosaMonoTimeseries,
 
 def split_timeseries(audio_data: LibrosaMonoTimeseries,
                      fragment_duration_sec: float,
+                     overlap_ratio: float = 0.50,
                      ) -> typing.List[LibrosaMonoTimeseries]:
 
     fragment_duration_in_samples = int(fragment_duration_sec * audio_data.sr)
 
-    split_points_indices = list(range(fragment_duration_in_samples,
-                                      len(audio_data.timeseries),
-                                      fragment_duration_in_samples)
-                                )
+    # split_points_indices = list(range(fragment_duration_in_samples,
+    #                                   len(audio_data.timeseries),
+    #                                   fragment_duration_in_samples)
+    #                             )
+    #
+    # timeseries_splits = np.split(audio_data.timeseries, indices_or_sections=split_points_indices)
 
-    timeseries_splits = np.split(audio_data.timeseries, indices_or_sections=split_points_indices)
-    if len(timeseries_splits[-1]) != fragment_duration_in_samples:
-        timeseries_splits.pop()
+    timeseries_splits = list()
+
+    offset_len = int(fragment_duration_in_samples * (1 - overlap_ratio))
+
+    for offset in range(0, len(audio_data.timeseries) - fragment_duration_in_samples, offset_len):
+        timeseries_splits.append(audio_data.timeseries[offset:offset + fragment_duration_in_samples])
+
+    if len(timeseries_splits) != 0:
+        if len(timeseries_splits[-1]) != fragment_duration_in_samples:
+            timeseries_splits.pop()
 
     splits = list()
     for split in timeseries_splits:
@@ -80,3 +92,28 @@ def get_fragment_of_timeseries(audio_data: LibrosaMonoTimeseries,
                         dtype=audio_data.timeseries.dtype)
 
     return LibrosaMonoTimeseries((fragment, audio_data.sr))
+
+
+def stream_generator(file: str, tmp_filepath: str, frame_sec: float = 5.0):
+    frame_length = int(frame_sec * audiofile.sampling_rate(file))
+    hop_length = frame_length
+    block_len = 1
+
+    try:
+        stream = librosa.core.stream(path=tmp_filepath,
+                                     block_length=block_len,
+                                     frame_length=frame_length,
+                                     hop_length=hop_length,
+                                     mono=True
+                                     )
+    except RuntimeError:
+        if os.path.exists(tmp_filepath):
+            os.remove(tmp_filepath)
+        audiofile.convert_to_wav(file, tmp_filepath)
+        stream = librosa.core.stream(path=tmp_filepath,
+                                     block_length=block_len,
+                                     frame_length=frame_length,
+                                     hop_length=hop_length,
+                                     mono=True
+                                     )
+    return stream
