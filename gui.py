@@ -1,4 +1,5 @@
 import pathlib
+import tkinter
 import tkinter as tk
 from tkinter import font
 
@@ -18,7 +19,7 @@ import inference
 import visual
 from gtzan_utils import GTZANLabels
 import threading
-import multiprocessing
+import time
 
 
 class GlobalEventFunctions:
@@ -95,19 +96,10 @@ class InfoHeaderFrame(tk.Frame):
         self.loading_gif_path = "./resources/spinner.gif"
         self.loading_gif = tk.PhotoImage(file=self.loading_gif_path, format="gif")
 
-        self.song_title = tk.Label(text="str(pathlib.Path(song_name).stem)", master=self.song_frame, background="white")
+        self.song_title = tk.Label(text="No file loaded", master=self.song_frame, background="white")
         self.song_title.grid(column=0, row=0, padx=0, pady=0, sticky='')
-        self.artist_name = tk.Label(text="Artist Name", master=self.song_frame, background="white")
-        self.artist_name.grid(column=0, row=1, padx=0, pady=0, sticky='')
-        # self.loading_label = tk.Label(image=self.loading_gif)
-        # self.loading_label.grid(column=0, row=2, padx=0, pady=0, sticky='')
-        # self.loading_label.pack_forget()
 
         self.class_plot = None
-
-
-    def display_loading_animation(self):
-        self.loading_label.pack()
 
     def display_class_plot(self, plot_img):
         self.class_plot = tk.Label(image=plot_img, background="white")
@@ -145,30 +137,62 @@ class PlayerWidget(tk.Frame):
         if self.muted:
             self.volume_button.configure(image=self.images["volume"])
             GlobalEventFunctions.change_volume(self.previous_volume)
+            self.volume_slider_position.set(self.previous_volume * 100)
         else:
             self.volume_button.configure(image=self.images["muted"])
+            self.volume_slider_position.set(0)
             self.previous_volume = pygame.mixer.music.get_volume()
             GlobalEventFunctions.change_volume(0)
         self.muted = not self.muted
 
     def volume_slider_changed(self):
         volume = float(self.volume_slider.get() / 100)
-        GlobalEventFunctions.change_volume(volume)
+        if not self.muted:
+            GlobalEventFunctions.change_volume(volume)
 
     def time_slider_changed(self):
-        new_position = float(self.timeslider.get() / 100) * self.song_duration
-        GlobalEventFunctions.set_song_position(new_position)
+        #pygame.mixer.music.rewind()
+        self.start_position = self.timeslider.get()
+        new_position = float(self.timeslider.get() / 1000) * self.song_duration
+        pygame.mixer.music.play(start=new_position)
+        if not self.playing:
+            pygame.mixer.music.pause()
+        #GlobalEventFunctions.set_song_position(new_position)
+
+    def update_timeslider(self):
+
+        if self.song_duration == 0:
+            self.time_slider_position.set(0)
+        else:
+            self.time_slider_position.set(self.start_position + (pygame.mixer.music.get_pos() / self.song_duration))
+
+        current_time_str = time.strftime("%M:%S", time.gmtime(int((self.timeslider.get() / 1000) * self.song_duration)))
+        duration_str = time.strftime("%M:%S", time.gmtime(int(self.song_duration)))
+        self.current_time_label.configure(text=current_time_str)
+        self.song_duration_label.configure(text=duration_str)
+
+        if self.time_slider_position.get() > 998.9:
+            self.start_position = 0
+            pygame.mixer.music.stop()
+            pygame.mixer.music.play()
+
+        self.after_id = self.after(ms=100, func=self.update_timeslider)
+
 
     def reset(self):
         self.started = False
         self.playing = False
         self.song_file = None
-        self.song_duration = None
+        self.song_duration = 0
         self.play_pause_button.configure(image=self.images["play"])
+        self.start_position = 0
+        pygame.mixer.music.play()
         pygame.mixer.music.stop()
+        self.update_timeslider()
 
     def __init__(self, master):
         super().__init__()
+        self.configure(background="white")
 
         image_paths = {
             "play": "./resources/play.png",
@@ -192,9 +216,18 @@ class PlayerWidget(tk.Frame):
         self.started = False
         self.playing = False
         self.muted = False
-        self.previous_volume = 0.1
+        self.previous_volume = 0.3
         self.song_file: str = None
-        self.song_duration: float = None
+        self.song_duration: float = 0.0
+        self.time_slider_position = tk.DoubleVar()
+        self.volume_slider_position = tk.DoubleVar()
+        self.volume_slider_position.set(self.previous_volume * 100)
+        self.after_id = None
+        self.start_position = 0
+
+
+        self.after(ms=50, func=self.update_timeslider)
+
 
         self.left_frame = tk.Frame(background="white")
         self.left_frame.grid(column=0, row=1, padx=10, pady=10, sticky='w')
@@ -213,7 +246,7 @@ class PlayerWidget(tk.Frame):
         self.current_time_label = tk.Label(master=self.center_frame, text="0:00", highlightthickness=0, bd=0, bg="white", activebackground="white", borderwidth=0, border=0)
         self.current_time_label.grid(column=0, row=0, padx=0, pady=0, sticky='')
 
-        self.timeslider = CustomScale(master=self.center_frame, from_=0, to=100, orient=tk.HORIZONTAL, length=300, sliderlength=15, command=lambda dummy: self.time_slider_changed())
+        self.timeslider = CustomScale(master=self.center_frame, from_=0, to=1000, orient=tk.HORIZONTAL, length=300, sliderlength=15, command=lambda dummy: self.time_slider_changed(), variable=self.time_slider_position)
         self.timeslider.grid(column=1, row=0, padx=10, pady=0, sticky='')
 
         self.song_duration_label = tk.Label(self.center_frame, text="0:00", highlightthickness=0, bd=0, bg="white", activebackground="white", borderwidth=0, border=0)
@@ -224,7 +257,7 @@ class PlayerWidget(tk.Frame):
                                        activebackground="white", command=lambda: PlayerWidget.volume_button_click(self))
         self.volume_button.grid(column=0, row=0, padx=0, pady=0, sticky='')
 
-        self.volume_slider = CustomScale(self.right_frame, from_=0, to=100, orient=tk.HORIZONTAL, sliderlength=15, length=70, command=lambda dummy: self.volume_slider_changed())
+        self.volume_slider = CustomScale(self.right_frame, from_=0, to=100, orient=tk.HORIZONTAL, sliderlength=15, length=70, command=lambda dummy: self.volume_slider_changed(), variable=self.volume_slider_position)
         self.volume_slider.grid(column=1, row=0, padx=10, pady=0, sticky='we')
 
 
@@ -256,43 +289,61 @@ class App(tk.Tk):
         self.wm_minsize(700, 400)
         self.resizable(False, False)
         self.style = ttk.Style(self)
+        self.working_fig, self.working_ax = plt.subplots()
 
         self.player_widget = PlayerWidget(self)
-        self.player_widget.grid(column=0, row=0, padx=0, pady=0, sticky='')
+        self.player_widget.grid(column=0, row=0, padx=0, pady=0, sticky='nsew')
 
         pygame.mixer.init()
         pygame.mixer.music.set_volume(self.player_widget.previous_volume)
-
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_columnconfigure(2, weight=1)
         self.grid_rowconfigure(0, weight=1)
-        # self.grid_rowconfigure(1, weight=1)
+        #self.grid_rowconfigure(1, weight=1)
+        #self.grid_rowconfigure(2, weight=1)
 
-        self.open_file_button = tk.Button(text="Open single file", command=lambda: App.open_file(self))
-        self.open_file_button.grid(column=0, row=2, padx=10, pady=10, sticky='')
-        self.predict_genre_button = tk.Button(text="Run genre prediction", command=lambda: self.start_prediction_thread())
-        self.predict_genre_button.grid(column=1, row=2, padx=10, pady=10, sticky='')
-        self.open_directory_button = tk.Button(text="Open directory")
-        self.open_directory_button.grid(column=2, row=2, padx=10, pady=10, sticky='')
+        self.right_panel_background = tk.Label(borderwidth=2, relief="raised")
+        self.right_panel_background.grid(column=3, row=0, padx=5, pady=5, sticky='nsew', rowspan=3)
+
+
+        self.open_file_button = tk.Button(text="Load a file", command=lambda: App.open_file(self))
+        self.open_file_button.grid(column=0, row=2, padx=5, pady=5, sticky='e')
+        self.predict_genre_button = tk.Button(text="Run genre recognition", command=lambda: self.start_prediction_thread())
+        self.predict_genre_button.grid(column=1, row=2, padx=5, pady=5, sticky='we')
+        self.open_directory_button = tk.Button(text="Settings")
+        self.open_directory_button.grid(column=2, row=2, padx=5, pady=5, sticky='w')
+
+        self.open_directory_button = tk.Button(text="Load a directory")
+        self.open_directory_button.grid(column=3, row=2, padx=10, pady=10, sticky='')
+
+
+        self.directory_list_box = tk.Listbox(relief="sunken", borderwidth=2, background="white")
+        self.directory_list_box.grid(column=3, row=0, padx=10, pady=10, sticky='nsew')
+
 
         self.protocol("WM_DELETE_WINDOW", self.on_close_event)
 
-        self.__load_model()
+        self.load_model()
 
-        self.after(ms=20000, func=lambda: self.player_widget.info_header_frame.display_class_plot(self.class_img))
+        # self.after(ms=20000, func=lambda: self.player_widget.info_header_frame.display_class_plot(self.class_img))
 
 
-    def __load_model(self):
+    def load_model(self):
         self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
 
     def on_close_event(self):
+        print(threading.active_count())
         tf.keras.backend.clear_session()
+        if self.player_widget.after_id is not None:
+            self.player_widget.after_cancel(self.player_widget.after_id)
+        pygame.mixer.music.stop()
+        self.quit()
         self.destroy()
 
     def open_file(self):
-        filepath = filedialog.askopenfilename(filetypes=(("Audio files", (".mp3", ".wav", ".ogg")),), title="Choose a file", initialdir="/home/aleksy/Full_Songs")
+        filepath = filedialog.askopenfilename(filetypes=(("mp3 audio files", (".mp3")),), title="Select a file", initialdir="/home/aleksy/Full_Songs")
         if filepath != "":
             self.file = filepath
             pygame.mixer.music.load(filepath)
@@ -300,6 +351,7 @@ class App(tk.Tk):
             self.player_widget.reset()
             self.player_widget.song_file = self.file
             self.player_widget.song_duration = self.file_duration
+            self.player_widget.info_header_frame.song_title.configure(text=str(pathlib.Path(self.file).stem))
 
     def start_prediction_thread(self):
         if self.prediction_thread is not None:
@@ -307,12 +359,15 @@ class App(tk.Tk):
                 print("Stil running.")
                 return
         self.prediction_thread = threading.Thread(target=self.predict_genre, daemon=True)
+        self.prediction_thread.setDaemon(True)
         self.prediction_thread.start()
         # proc = multiprocessing.Process(target=self.predict_genre)
         # proc.start()
         # proc.join()
         # self.player_widget.info_header_frame.display_loading_animation()
 
+    def draw_class_distribution(self):
+        pass
 
     def predict_genre(self):
         print(self.file)
@@ -329,7 +384,7 @@ class App(tk.Tk):
                                                                            fragment_duration_sec=5.0)
                 sample_mel = audio_processing.mel_from_timeseries(audio_sample, mel_bands=256)
                 mels.append(sample_mel)
-            fig, ax = plt.subplots()
+            fig, ax = self.working_fig, self.working_ax
             images = []
             for mel in mels:
                 visual.mel_only_on_ax(mel, ax)
@@ -376,11 +431,11 @@ class App(tk.Tk):
                 "prob": outputs_scaled
             }
 
-            fig, ax = plt.subplots()
-            visual.prepare_class_for_class_distribution(fig, ax)
-            visual.draw_class_distribution(ax, labels, outputs_scaled)
-            arr = inference.fig_to_array(fig=fig)
-            self.class_img = ImageTk.PhotoImage(Image.fromarray(arr).resize(size=(300, 200)))
+            # fig, ax = plt.subplots()
+            # visual.prepare_class_for_class_distribution(fig, ax)
+            # visual.draw_class_distribution(ax, labels, outputs_scaled)
+            # arr = inference.fig_to_array(fig=fig)
+            # self.class_img = ImageTk.PhotoImage(Image.fromarray(arr).resize(size=(300, 200)))
         return
 
 
