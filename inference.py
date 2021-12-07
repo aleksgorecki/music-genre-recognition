@@ -101,6 +101,15 @@ if __name__ == "__main__":
         images.append(image)
 
 
+    plt.switch_backend("Agg")
+    fig, ax = plt.subplots()
+    images = []
+    for mel in mels:
+        visual.mel_only_on_ax(mel, ax)
+        img = fig_to_array(fig)
+        img = preprocess_img_array(img)
+        images.append(img)
+
     outputs = []
     for image in images:
         output = model.predict(x=image, batch_size=1)

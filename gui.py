@@ -122,18 +122,20 @@ class PlayerWidget(tk.Frame):
         pass
 
     def play_pause_click(self):
-        if self.playing:
-            self.play_pause_button.configure(image=self.images["play"])
-            GlobalEventFunctions.pause_song()
-        else:
-            self.play_pause_button.configure(image=self.images["pause"])
-            if self.started:
-                GlobalEventFunctions.unpause_song()
-            else:
-                self.started = True
-                GlobalEventFunctions.play_song()
+        if self.song_file is not None:
+            if self.song_file != "":
+                if self.playing:
+                    self.play_pause_button.configure(image=self.images["play"])
+                    GlobalEventFunctions.pause_song()
+                else:
+                    self.play_pause_button.configure(image=self.images["pause"])
+                    if self.started:
+                        GlobalEventFunctions.unpause_song()
+                    else:
+                        self.started = True
+                        GlobalEventFunctions.play_song()
 
-        self.playing = not self.playing
+                self.playing = not self.playing
 
     def volume_button_click(self):
         if self.muted:
@@ -277,6 +279,7 @@ class PlayerWidget(tk.Frame):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+
         self.configure(bg="white")
         self.file = None
         self.file_duration = None
@@ -291,8 +294,7 @@ class App(tk.Tk):
         self.title('Music genre recognition')
         self.wm_minsize(700, 400)
         self.resizable(False, False)
-        self.style = ttk.Style(self)
-        self.working_fig, self.working_ax = plt.subplots()
+        # self.working_fig, self.working_ax = plt.subplots()
 
         self.player_widget = PlayerWidget(self)
         self.player_widget.grid(column=0, row=0, padx=0, pady=0, sticky='nsew')
@@ -329,7 +331,13 @@ class App(tk.Tk):
 
         self.load_model()
 
-        # self.after(ms=20000, func=lambda: self.player_widget.info_header_frame.display_class_plot(self.class_img))
+    #     self.after(ms=1000, func=lambda: self.matplotlib_routine())
+    #     # self.after(ms=20000, func=lambda: self.player_widget.info_header_frame.display_class_plot(self.class_img))
+    #
+    # def matplotlib_routine(self):
+    #     if self.file is not None:
+    #         self.predict_genre()
+    #     self.after(ms=1000, func=lambda: self.matplotlib_routine())
 
     def load_model(self):
         self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
@@ -409,7 +417,7 @@ class App(tk.Tk):
                                                                            fragment_duration_sec=5.0)
                 sample_mel = audio_processing.mel_from_timeseries(audio_sample, mel_bands=256)
                 mels.append(sample_mel)
-            fig, ax = self.working_fig, self.working_ax
+            fig, ax = plt.subplots()
             images = []
             for mel in mels:
                 visual.mel_only_on_ax(mel, ax)
