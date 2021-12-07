@@ -1,7 +1,9 @@
+import os
 import pathlib
 import tkinter
 import tkinter as tk
 from tkinter import font
+from tkinter import messagebox
 
 import audiofile
 import matplotlib.pyplot as plt
@@ -278,6 +280,7 @@ class App(tk.Tk):
         self.configure(bg="white")
         self.file = None
         self.file_duration = None
+        self.dir = None
         self.style = ttk.Style().theme_use("clam")
         self.prediction_thread: threading.Thread = None
         tf.config.experimental.set_memory_growth(tf.config.list_physical_devices("GPU")[0], True)
@@ -315,13 +318,12 @@ class App(tk.Tk):
         self.open_directory_button = tk.Button(text="Settings")
         self.open_directory_button.grid(column=2, row=2, padx=5, pady=5, sticky='w')
 
-        self.open_directory_button = tk.Button(text="Load a directory")
+        self.open_directory_button = tk.Button(text="Load a directory", command=lambda: self.open_directory())
         self.open_directory_button.grid(column=3, row=2, padx=10, pady=10, sticky='')
 
-
-        self.directory_list_box = tk.Listbox(relief="sunken", borderwidth=2, background="white")
+        self.directory_list_box = tk.Listbox(selectmode="single", relief="sunken", borderwidth=2, background="white", width=40)
         self.directory_list_box.grid(column=3, row=0, padx=10, pady=10, sticky='nsew')
-
+        self.directory_list_box.bind("<<ListboxSelect>>", lambda dummy: self.open_file_from_list())
 
         self.protocol("WM_DELETE_WINDOW", self.on_close_event)
 
@@ -329,12 +331,10 @@ class App(tk.Tk):
 
         # self.after(ms=20000, func=lambda: self.player_widget.info_header_frame.display_class_plot(self.class_img))
 
-
     def load_model(self):
         self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
 
     def on_close_event(self):
-        print(threading.active_count())
         tf.keras.backend.clear_session()
         if self.player_widget.after_id is not None:
             self.player_widget.after_cancel(self.player_widget.after_id)
@@ -352,6 +352,31 @@ class App(tk.Tk):
             self.player_widget.song_file = self.file
             self.player_widget.song_duration = self.file_duration
             self.player_widget.info_header_frame.song_title.configure(text=str(pathlib.Path(self.file).stem))
+
+    def open_file_from_list(self):
+        filepath = pathlib.Path(self.dir).joinpath(self.directory_list_box.selection_get())
+        filepath = str(filepath) + ".mp3"
+        if filepath != "":
+            self.file = filepath
+            pygame.mixer.music.load(filepath)
+            self.file_duration = audiofile.duration(filepath)
+            self.player_widget.reset()
+            self.player_widget.song_file = self.file
+            self.player_widget.song_duration = self.file_duration
+            self.player_widget.info_header_frame.song_title.configure(text=str(pathlib.Path(self.file).stem))
+
+    def open_directory(self):
+        dir_path = filedialog.askdirectory()
+        if dir_path != "":
+            self.dir = dir_path
+            idx = 0
+            for file in pathlib.Path(dir_path).iterdir():
+                if file.suffix == ".mp3":
+                    self.directory_list_box.insert(idx, file.stem)
+                    idx += 1
+            if idx < 1:
+                tk.messagebox.showwarning(title="Found no files", message="Found no mp3 files in selected directory.")
+
 
     def start_prediction_thread(self):
         if self.prediction_thread is not None:
