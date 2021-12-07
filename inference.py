@@ -44,6 +44,12 @@ def fig_to_array(fig: plt.Figure, dpi: int = 100) -> numpy.typing.ArrayLike:
     return img_arr
 
 
+def predict_from_single_fragment():
+    pass
+
+def predict_mean_from_multiple_fragments():
+    pass
+
 def prepare_model(model_obj: tf.keras.Model, weights_path: str) -> None:
     pass
 
