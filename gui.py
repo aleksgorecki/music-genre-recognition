@@ -509,8 +509,10 @@ class Gui(tk.Tk):
             if self.directory_list_box.selection_get() != "" and self.directory_list_box.selection_get() != ():
                 filepath = pathlib.Path(self.dir).joinpath(self.directory_list_box.selection_get())
                 filepath = str(filepath) + ".mp3"
-                print(filepath)
                 self.file = filepath
+
+                print(self.directory_list_box.curselection()[0])
+
                 pygame.mixer.music.load(filepath)
                 self.file_duration = audiofile.duration(filepath)
                 self.player_widget.reset()
