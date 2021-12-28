@@ -308,7 +308,175 @@ def labels_to_file(split_dir: str):
         json.dump(obj=label_int_mapping, fp=f)
 
 
+def dataset_to_mels(original_dir: str,
+                    destination_dir: str,
+                    clear_dest: bool = True,
+                    mel_bands: int = 256,
+                    sr_overwrite: int = None,
+                    split_duration: float = None,
+                    cut_fragment: bool = False,
+                    spec_log_scale: bool = True,
+                    overlap_ratio: float = 0.50,
+                    dpi: int = 100
+                    ):
+
+    if not validate_destination_dir(destination_dir, clear_dest):
+        raise Exception
+
+    fig, ax = plt.subplots()
+    plt.close(fig)
+
+    genres = list(pathlib.Path(original_dir).iterdir())
+
+    for genre in genres:
+
+        genre_name = genre.name
+
+        genre_destination_dir = pathlib.Path(destination_dir).joinpath(genre_name)
+        os.makedirs(genre_destination_dir, exist_ok=True)
+
+        source_files = list(pathlib.Path(original_dir).joinpath(genre_name).iterdir())
+        for source_file in source_files:
+
+            try:
+                audio_data = audio_processing.load_to_mono(str(source_file), sr_overwrite)
+            except (RuntimeError, audioread.exceptions.NoBackendError):
+                print(f"\n(!) File {source_file.stem} was skipped because it couldnt be loaded and may be corrupted.")
+                continue
+
+            mels_to_save = list()
+            if split_duration is not None:
+                if split_duration > len(audio_data.timeseries)*audio_data.sr:
+                    print(f"\n(!) File {source_file.stem} was skipped because it was shorter than the fragment length.")
+                    continue
+                if cut_fragment:
+                    fragment = audio_processing.get_fragment_of_timeseries(audio_data,
+                                                                           len(audio_data.timeseries)/audio_data.sr*0.5,
+                                                                           split_duration
+                                                                           )
+                    mel = audio_processing.mel_from_timeseries(fragment, mel_bands,
+                                                               sr_overwrite, log_scale=spec_log_scale)
+                    mels_to_save.append(mel)
+                else:
+                    splits = audio_processing.split_timeseries(audio_data, split_duration, overlap_ratio)
+                    if len(splits) == 0:
+                        continue
+                    mels_to_save = [
+                        audio_processing.mel_from_timeseries(x, mel_bands, sr_overwrite, spec_log_scale)
+                        for x in splits
+                    ]
+            else:
+                mel = audio_processing.mel_from_timeseries(audio_data, mel_bands,
+                                                           sr_overwrite, log_scale=spec_log_scale)
+                mels_to_save.append(mel)
+
+            for part_num, mel in enumerate(mels_to_save):
+                visual.mel_only_on_ax(mel, ax)
+                mel_save_filename = pathlib.Path(genre_destination_dir).joinpath(
+                    f"{source_file.stem}_part{part_num}.png"
+                )
+                fig.savefig(fname=mel_save_filename, bbox_inches="tight", pad_inches=0.0, dpi=dpi)
+
+            print(f"\rCurrent state: {genre_name}: {source_file.stem}", end="")
+
+
+def dataset_to_specs(original_dir: str,
+                    destination_dir: str,
+                    clear_dest: bool = True,
+                    sr_overwrite: int = None,
+                    split_duration: float = None,
+                    cut_fragment: bool = False,
+                    spec_log_scale: bool = True,
+                    log_frequency_axis: bool = False,
+                    overlap_ratio: float = 0.50,
+                    dpi: int = 100
+                    ):
+
+    if not validate_destination_dir(destination_dir, clear_dest):
+        raise Exception
+
+    fig, ax = plt.subplots()
+    plt.close(fig)
+
+    genres = list(pathlib.Path(original_dir).iterdir())
+
+    for genre in genres:
+
+        genre_name = genre.name
+
+        genre_destination_dir = pathlib.Path(destination_dir).joinpath(genre_name)
+        os.makedirs(genre_destination_dir, exist_ok=True)
+
+        source_files = list(pathlib.Path(original_dir).joinpath(genre_name).iterdir())
+        for source_file in source_files:
+
+            try:
+                audio_data = audio_processing.load_to_mono(str(source_file), sr_overwrite)
+            except (RuntimeError, audioread.exceptions.NoBackendError):
+                print(f"\n(!) File {source_file.stem} was skipped because it couldnt be loaded and may be corrupted.")
+                continue
+
+            specs_to_save = list()
+            if split_duration is not None:
+                if split_duration > len(audio_data.timeseries)*audio_data.sr:
+                    print(f"\n(!) File {source_file.stem} was skipped because it was shorter than the fragment length.")
+                    continue
+                if cut_fragment:
+                    fragment = audio_processing.get_fragment_of_timeseries(audio_data,
+                                                                           len(audio_data.timeseries)/audio_data.sr*0.5,
+                                                                           split_duration
+                                                                           )
+                    spec = audio_processing.spec_from_timeseries(fragment,
+                                                               sr_overwrite, log_scale=spec_log_scale)
+                    specs_to_save.append(spec)
+                else:
+                    splits = audio_processing.split_timeseries(audio_data, split_duration, overlap_ratio)
+                    if len(splits) == 0:
+                        continue
+                    specs_to_save = [
+                        audio_processing.spec_from_timeseries(x, sr_overwrite, spec_log_scale)
+                        for x in splits
+                    ]
+            else:
+                spec = audio_processing.spec_from_timeseries(audio_data,
+                                                           sr_overwrite, log_scale=spec_log_scale)
+                specs_to_save.append(spec)
+
+            for part_num, spec in enumerate(specs_to_save):
+                visual.spec_only_on_ax(spec, ax, log_frequency_axis)
+                spec_save_filename = pathlib.Path(genre_destination_dir).joinpath(
+                    f"{source_file.stem}_part{part_num}.png"
+                )
+                fig.savefig(fname=spec_save_filename, bbox_inches="tight", pad_inches=0.0, dpi=dpi)
+
+            print(f"\rCurrent state: {genre_name}: {source_file.stem}", end="")
+
+
+def split_mel_dataset(original_dir,
+                      dest_dir=None,
+                      shuffle: bool = True,
+                      seed: int = None,
+                      train_ratio: float = 0.70,
+                      test_ratio: float = 0.20,
+                      val_ratio: float = 0.10):
+
+    if dest_dir is None:
+        dest_dir=original_dir
+
+    dataset_splits = get_splits_for_dataset(original_dir, shuffle, seed, train_ratio, test_ratio, val_ratio)
+
+    for split_name in dataset_splits.split_dict.keys():
+        os.makedirs(pathlib.Path(dest_dir).joinpath(split_name))
+        for genre in dataset_splits.split_dict[split_name].keys():
+            dest_dir_path = pathlib.Path(dest_dir).joinpath(split_name).joinpath(genre)
+            os.makedirs(dest_dir_path, exist_ok=True)
+            for source_file in dataset_splits.split_dict[split_name][genre]:
+                shutil.copy(source_file, dest_dir_path)
+
+
+
 if __name__ == "__main__":
+    pass
     # DEFAULT_SPLIT_DEST = "/home/aleksy/gtzan_split/"
     # DEFAULT_MEL_DEST = "/home/aleksy/gtzan_mel/"
     # DEFAULT_SPLIT_DURATION = 5.0
@@ -316,15 +484,22 @@ if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
     # parser.add_argument()
 
-    main_split_dict = get_splits_for_dataset(
-        genres_dir="/home/aleksy/dev/datasets/gtzan_fixed/Data/genres_original",
-        seed=datetime.datetime.now()
-    )
-    #main_split_dict.to_pandas_dataframes()
-
-    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512", split_duration=5.0, mel_bands=512, overlap_ratio=0.50)
-    shuffle_mix_song_parts("/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512", "/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512_mixed")
-
-    save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512", split_duration=5.0, mel_bands=512, overlap_ratio=0.70)
-    shuffle_mix_song_parts("/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512", "/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512_mixed")
+    # main_split_dict = get_splits_for_dataset(
+    #     genres_dir="/home/aleksy/dev/datasets/gtzan_fixed/Data/genres_original",
+    #     seed=datetime.datetime.now()
+    # )
+    # #main_split_dict.to_pandas_dataframes()
+    #
+    # # save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512", split_duration=5.0, mel_bands=512, overlap_ratio=0.50)
+    # # shuffle_mix_song_parts("/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512", "/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_512_mixed")
+    # #
+    # # save_splits_as_mels(main_split_dict, destination_dir="/home/aleksy/gtzan_versions/gtzan_spec_5_sec_70_512", split_duration=5.0, mel_bands=512, overlap_ratio=0.70)
+    # shuffle_mix_song_parts("/home/aleksy/gtzan_versions/5sec/gtzan_spec_5_sec_50", "/home/aleksy/gtzan_versions/gtzan_spec_5_sec_50_mixed")
+    # dataset_to_specs("/home/aleksy/dev/datasets/gtzan_fixed/Data/genres_original", destination_dir="/home/aleksy/gtzan_spec_lin", split_duration=5.0, overlap_ratio=0.5, log_frequency_axis=False)
+    # split_mel_dataset("/home/aleksy/gtzan_spec_lin")
+    #
+    # dataset_to_specs("/home/aleksy/dev/datasets/gtzan_fixed/Data/genres_original", destination_dir="/home/aleksy/gtzan_spec_log", split_duration=5.0, overlap_ratio=0.5, log_frequency_axis=True)
+    # split_mel_dataset("/home/aleksy/gtzan_spec_log")
+    # dataset_to_mels("/home/aleksy/dev/datasets/gtzan_fixed/Data/genres_original", destination_dir="/home/aleksy/gtzan_spec_5_sec_50_1024", split_duration=5.0, overlap_ratio=0.5, mel_bands=1024)
+    # split_mel_dataset("/home/aleksy//home/aleksy/gtzan_spec_5_sec_50_1024")
 

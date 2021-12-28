@@ -17,8 +17,10 @@ import audio_processing
 import inference
 import visual
 from gtzan_utils import GTZANLabels
+from fma_utils import FMALabels
 import threading
 import time
+from inference import *
 
 
 class CustomScale(tk.Scale):
@@ -329,20 +331,34 @@ class SettingsPopUp(tk.Toplevel):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.model1_label = tk.Label(text="GTZAN (8 genres)", master=self.model_selection_frame)
-        self.model1_label.grid(column=0, row=0, padx=10, pady=10, sticky='w')
-        self.model2_label = tk.Label(text="GTZAN + FMA (13 genres)", master=self.model_selection_frame)
-        self.model2_label.grid(column=0, row=1, padx=10, pady=10, sticky='w')
+        self.model_var = tk.StringVar()
+        self.model_var.set(self.master.model_type)
 
-        self.single_selection_label = tk.Label(text="One frame", master=self.frame_extraction_mode_frame)
-        self.single_selection_label.grid(column=0, row=0, padx=10, pady=10, sticky='w')
-        self.multi_selection_label = tk.Label(text="Mean average of multiple frames",
-                                              master=self.frame_extraction_mode_frame)
-        self.multi_selection_label.grid(column=0, row=1, padx=10, pady=10, sticky='w')
+        self.window_var = tk.StringVar()
+        self.window_var.set(self.master.window_type)
+
+
+        #self.model1_radiobutton = tk.Label(text="GTZAN (8 genres)", master=self.model_selection_frame)
+        self.model1_radiobutton = tk.Radiobutton(text="GTZAN (10 genres)", value="gtzan", master=self.model_selection_frame, var=self.model_var)
+        self.model1_radiobutton.grid(column=0, row=0, padx=10, pady=10, sticky='w')
+        #self.model2_radiobutton = tk.Label(text="GTZAN + FMA (13 genres)", master=self.model_selection_frame)
+        self.model2_radiobutton = tk.Radiobutton(text="FMA (8 genres)", value="fma", master=self.model_selection_frame, var=self.model_var)
+        self.model2_radiobutton.grid(column=0, row=1, padx=10, pady=10, sticky='w')
+
+        self.single_selection_radiobutton = tk.Radiobutton(text="One frame", master=self.frame_extraction_mode_frame, value="single", var=self.window_var)
+        self.single_selection_radiobutton.grid(column=0, row=0, padx=10, pady=10, sticky='w')
+        self.multi_selection_radiobutton = tk.Radiobutton(text="Mean average of multiple frames", value="multi", var=self.window_var,
+                                                    master=self.frame_extraction_mode_frame)
+        self.multi_selection_radiobutton.grid(column=0, row=1, padx=10, pady=10, sticky='w')
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+
+        self.model_var.trace('w', lambda dummy1, dummy2, dummy3: self.master.load_model(self.model_var.get()))
+
+        self.window_var.trace('w', lambda dummy1, dummy2, dummy3: self.master.change_window_type(self.window_var.get()))
+        #self.window_var.trace('w', oddblue)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close_event)
 
@@ -411,7 +427,9 @@ class Gui(tk.Tk):
 
         self.class_img = None
         self.prediction_output = None
-        self.class_labels = None
+        self.class_labels = GTZANLabels
+        self.model_type = "gtzan"
+        self.window_type = "multi"
 
 
         # root window
@@ -472,9 +490,22 @@ class Gui(tk.Tk):
     #         self.predict_genre()
     #     self.after(ms=1000, func=lambda: self.matplotlib_routine())
 
-    def load_model(self):
+    def load_model(self, model_str="gtzan"):
         # self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
-        self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
+        if model_str == "gtzan":
+            self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
+            self.class_labels = GTZANLabels
+        else:
+            self.model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256-mixed-fma-100-0.0001/40-0.80")
+            self.class_labels = FMALabels
+        self.model.compile()
+        self.classes = self.class_labels
+        self.model_type = model_str
+
+
+    def change_window_type(self, window_str="multi"):
+        self.window_type = window_str
+
 
     def on_close_event(self):
         tf.keras.backend.clear_session()
@@ -583,75 +614,82 @@ class Gui(tk.Tk):
         print(self.file)
         if self.file is not None and self.file != ():
             model = self.model
-            audio = audio_processing.load_to_mono(self.file)
-            plots_interval_sec = 10
-            audio_in_sec = len(audio.timeseries) / audio.sr
-            plot_points = np.arange(0, len(audio.timeseries) / audio.sr - plots_interval_sec,
-                                    plots_interval_sec)
-            mels = list()
-            for pp in plot_points:
-                audio_sample = audio_processing.get_fragment_of_timeseries(audio, offset_sec=pp,
-                                                                           fragment_duration_sec=5.0)
-                sample_mel = audio_processing.mel_from_timeseries(audio_sample, mel_bands=256)
-                mels.append(sample_mel)
-            plt.switch_backend("Agg")
-            fig, ax = plt.subplots()
-            images = []
-            for mel in mels:
-                visual.mel_only_on_ax(mel, ax)
-                img = inference.fig_to_array(fig)
-                img = inference.preprocess_img_array(img)
-                images.append(img)
 
-            outputs = []
-            for image in images:
-                output = model.predict(x=image, batch_size=1)
-                outputs.append(output)
+            if self.window_type == "multi":
+                outputs = run_multiple_predictions(model, self.file, fragment_duration=5.0,
+                                                   window_interval=15.0)
+                outputs = np.sum(outputs, axis=0) / len(outputs)
+            else:
+                outputs = run_single_prediction(model, self.file, fragment_duration=5.0,
+                                                offset_sec=60.0)
 
-            sum_output = np.sum(outputs, axis=0)
-            mean_output = sum_output / len(outputs)
+            self.prediction_output = outputs
 
-            output = mean_output
+            # classes = sort_output_dict(classes)
+            # print("Predicted genre: ", most_probable_class_from_class_dict(classes).capitalize())
+            # if args.print_all:
+            #     print_output_dict(classes)
 
-            self.prediction_output = output[0]
-
-            label_idx_dict = dict()
-            GTZAN_classes = GTZANLabels
-            #combined_labels = ["Blues", "Classical", "Country", "Disco", "Electronic", "Experimental", "Folk", "Hiphop",
-                               #"Instrumental", "International", "Jazz", "Metal", "Pop", "Reggae", "Rock"]
-            # GTZAN_classes = combined_labels
-            for idx, label in enumerate(sorted(GTZAN_classes)):
-                label_idx_dict.update({idx: label})
-            probability_dict = dict()
-            for idx, prob in enumerate(list(output[0])):
-                probability_dict.update({label_idx_dict[idx]: prob})
-
-            for item in probability_dict.items():
-                print(item)
-
-            print("=========")
-
-            for item in probability_dict.items():
-                if item[1] > 0.09:
-                    proc = item[1] * 100
-                    print(item[0], proc)
-
-            print("==========")
-            print(max(probability_dict.items(), key=lambda item: item[1])[0])
-
-            outputs_scaled = [int(x * 100) for x in output[0]]
-            labels = [x.capitalize() for x in sorted(GTZAN_classes)]
-
-            d = {
-                "class": labels,
-                "prob": outputs_scaled
-            }
-
+            # audio = audio_processing.load_to_mono(self.file)
+            # plots_interval_sec = 10
+            # audio_in_sec = len(audio.timeseries) / audio.sr
+            # plot_points = np.arange(0, len(audio.timeseries) / audio.sr - plots_interval_sec,
+            #                         plots_interval_sec)
+            # mels = list()
+            # for pp in plot_points:
+            #     audio_sample = audio_processing.get_fragment_of_timeseries(audio, offset_sec=pp,
+            #                                                                fragment_duration_sec=5.0)
+            #     sample_mel = audio_processing.mel_from_timeseries(audio_sample, mel_bands=256)
+            #     mels.append(sample_mel)
+            # plt.switch_backend("Agg")
             # fig, ax = plt.subplots()
-            # visual.prepare_class_for_class_distribution(fig, ax)
-            # visual.draw_class_distribution(ax, labels, outputs_scaled)
-            # arr = inference.fig_to_array(fig=fig)
-            # self.class_img = ImageTk.PhotoImage(Image.fromarray(arr).resize(size=(300, 200)))
+            # images = []
+            # for mel in mels:
+            #     visual.mel_only_on_ax(mel, ax)
+            #     img = inference.fig_to_array(fig)
+            #     img = inference.preprocess_img_array(img)
+            #     images.append(img)
+            #
+            # outputs = []
+            # for image in images:
+            #     output = model.predict(x=image, batch_size=1)
+            #     outputs.append(output)
+            #
+            # sum_output = np.sum(outputs, axis=0)
+            # mean_output = sum_output / len(outputs)
+            #
+            # output = mean_output
+            #
+            # self.prediction_output = output[0]
+            #
+            # label_idx_dict = dict()
+            # labels = self.class_labels
+            # for idx, label in enumerate(sorted(labels)):
+            #     label_idx_dict.update({idx: label})
+            # probability_dict = dict()
+            # for idx, prob in enumerate(list(output[0])):
+            #     probability_dict.update({label_idx_dict[idx]: prob})
+            #
+            # for item in probability_dict.items():
+            #     print(item)
+            #
+            # print("=========")
+            #
+            # for item in probability_dict.items():
+            #     if item[1] > 0.09:
+            #         proc = item[1] * 100
+            #         print(item[0], proc)
+            #
+            # print("==========")
+            # print(max(probability_dict.items(), key=lambda item: item[1])[0])
+            #
+            # outputs_scaled = [int(x * 100) for x in output[0]]
+            # labels = [x.capitalize() for x in sorted(labels)]
+            #
+            # d = {
+            #     "class": labels,
+            #     "prob": outputs_scaled
+            # }
         return
 
 

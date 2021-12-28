@@ -1,24 +1,23 @@
 import os
-import pathlib
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import numpy as np
 import numpy.typing
 import tensorflow as tf
+tf.get_logger().setLevel('INFO')
 import audio_processing
 import visual
 import keras_preprocessing.image
-import shutil
 from matplotlib import pyplot as plt
-import matplotlib
+import argparse
 from PIL import Image
 import io
+import warnings
 
-from visual import draw_class_distribution, prepare_class_for_class_distribution
 from gtzan_utils import GTZANLabels
 from fma_utils import FMALabels
 
 
-GTZAN_classes = GTZANLabels
 MELS = 256 #128
 FRAGMENT_DURATION = 5.0
 
@@ -44,117 +43,132 @@ def fig_to_array(fig: plt.Figure, dpi: int = 100) -> numpy.typing.ArrayLike:
     return img_arr
 
 
-def predict_from_single_fragment():
-    pass
-
-def predict_mean_from_multiple_fragments():
-    pass
-
 def prepare_model(model_obj: tf.keras.Model, weights_path: str) -> None:
     pass
 
 
 def run_single_prediction(compiled_model: tf.keras.Model,
-                          audio_data: audio_processing.LibrosaMonoTimeseries,
+                          file_path: str,
                           fragment_duration: float = 5.0,
-                          offset_percent: float = 0.50
+                          offset_sec: float = 0.0
                           ):
-    pass
+    audio_data = audio_processing.load_to_mono(file_path, offset_sec=offset_sec, duration=fragment_duration)
+    sample_mel = audio_processing.mel_from_timeseries(audio_data, MELS)
+    plt.switch_backend("Agg")
+    fig, ax = plt.subplots()
+    visual.mel_only_on_ax(sample_mel, ax)
+    mel_img = fig_to_array(fig)
+    mel_img = preprocess_img_array(mel_img)
 
-if __name__ == "__main__":
-    label_idx_dict = dict()
-    for idx, label in enumerate(sorted(GTZAN_classes)):
-        label_idx_dict.update({idx: label})
-
-
-    # with open("/home/aleksy/Desktop/model1.json", "r") as json_f:
-    #     json_str = json_f.read()
-    #
-    # model: tf.keras.Model = tf.keras.models.model_from_json(json_str)
-    # model.load_weights("/home/aleksy/Desktop/weights")
-
-    model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
-    model.summary()
+    output = compiled_model.predict(x=mel_img, batch_size=1)
+    return output[0]
 
 
-    audio_path = "/home/aleksy/Full_Songs/Silent Hill 4 - Waiting For you.mp3"
+def run_multiple_predictions(compiled_model: tf.keras.Model,
+                             file_path: str,
+                             fragment_duration: float = 5.0,
+                             window_interval: float = 30
+                             ):
+    audio_data = audio_processing.load_to_mono(file_path)
+    audio_duration_sec = int(len(audio_data.timeseries) / audio_data.sr)
+    plot_points = np.arange(0, audio_duration_sec - fragment_duration, window_interval)
 
-
-    audio = audio_processing.load_to_mono(audio_path)
-
-    plots_interval_sec = 120
-    audio_in_sec = len(audio.timeseries)/audio.sr
-    plot_points = np.arange(plots_interval_sec, len(audio.timeseries)/audio.sr - plots_interval_sec, plots_interval_sec)
     mels = list()
-    for pp in plot_points:
-        audio_sample = audio_processing.get_fragment_of_timeseries(audio, offset_sec=pp, fragment_duration_sec=FRAGMENT_DURATION)
-        sample_mel = audio_processing.mel_from_timeseries(audio_sample, mel_bands=MELS)
-        mels.append(sample_mel)
-
-    sample_files = "/home/aleksy/tmp_mels"
-
-    if os.path.exists(sample_files):
-        shutil.rmtree(sample_files)
-    os.makedirs(sample_files, exist_ok=True)
-    for idx, mel in enumerate(mels):
-        visual.save_mel_only(sample_files + f"/{idx}", mel_data=mel)
-
-    images = []
-    for file in pathlib.Path(sample_files).iterdir():
-        image = keras_preprocessing.image.load_img(file, color_mode="rgba", target_size=(369, 496))
-        image = keras_preprocessing.image.img_to_array(image)/255
-        image = image.reshape((1, image.shape[0], image.shape[1], image.shape[2]))
-        images.append(image)
-
+    for point in plot_points:
+        window = audio_processing.get_fragment_of_timeseries(audio_data, point, fragment_duration)
+        mel = audio_processing.mel_from_timeseries(window, mel_bands=MELS)
+        mels.append(mel)
 
     plt.switch_backend("Agg")
     fig, ax = plt.subplots()
-    images = []
+    imgs = list()
     for mel in mels:
         visual.mel_only_on_ax(mel, ax)
-        img = fig_to_array(fig)
-        img = preprocess_img_array(img)
-        images.append(img)
+        mel_img = fig_to_array(fig)
+        mel_img = preprocess_img_array(mel_img)
+        imgs.append(mel_img)
 
-    outputs = []
-    for image in images:
-        output = model.predict(x=image, batch_size=1)
-        outputs.append(output)
+    outputs = list()
+    for img in imgs:
+        output = compiled_model.predict(x=img, batch_size=1)
+        outputs.append(output[0])
 
-    sum_output = np.sum(outputs, axis=0)
-    mean_output = sum_output/len(outputs)
+    return outputs
 
 
-    output = mean_output
+def process_single_output(output: np.typing.ArrayLike, labels: list) -> dict:
+    class_dict = dict()
+    for idx, label in enumerate(labels):
+        class_dict.update({label: output[idx]})
 
-    probability_dict = dict()
-    for idx, prob in enumerate(list(output[0])):
-        probability_dict.update({label_idx_dict[idx]: prob})
+    return class_dict
+    pass
 
-    for item in probability_dict.items():
-        print(item)
 
-    print("=========")
+def mean_average_output(outputs: list, labels: list) -> dict:
+    mean_output = np.sum(outputs, axis=0) / len(outputs)
+    class_dict = dict()
+    for idx, label in enumerate(labels):
+        class_dict.update({label: mean_output[idx]})
 
-    for item in probability_dict.items():
-        if item[1] > 0.09:
-            proc = item[1] * 100
-            print(item[0], proc)
+    return class_dict
 
-    print("==========")
-    print(pathlib.Path(audio_path).stem)
-    print(max(probability_dict.items(), key=lambda item: item[1])[0])
 
-    outputs_scaled = [int(x * 100) for x in output[0]]
-    labels = [x.capitalize() for x in sorted(GTZAN_classes)]
+def weighted_average_output(outputs: list, labels: list) -> dict:
+    mean_output = np.sum(outputs, axis=0) / len(outputs)
+    class_dict = dict()
+    for idx, label in enumerate(labels):
+        class_dict.update({label: mean_output[idx]})
 
-    d = {
-        "class": labels,
-        "prob": outputs_scaled
-    }
+    return class_dict
 
-    fig, ax = plt.subplots()
-    prepare_class_for_class_distribution(fig, ax)
-    draw_class_distribution(ax, labels, outputs_scaled)
-    plt.show()
+
+def sort_output_dict(output_dict: dict) -> dict:
+    return {k: v for k, v in sorted(output_dict.items(), key=lambda item: item[1], reverse=True)}
+
+
+def print_output_dict(output_dict: dict) -> None:
+    for item in output_dict.items():
+        print(item[0].capitalize(), ": ", int(item[1] * 100), "%")
+
+
+def most_probable_class_from_class_dict(output_dict: dict):
+    return max(output_dict, key=output_dict.get)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--file", "-f", type=str, required=True)
+    parser.add_argument("--model", type=str, default="gtzan", choices=["fma", "gtzan"])
+    parser.add_argument("--window", "-w", type=str, choices=["single", "multiple"], required=False, default="multiple")
+    parser.add_argument("--window-len", type=float, required=False, default=5.0)
+    parser.add_argument("--window-interval", type=float, default=30.0)
+    parser.add_argument("--offset", type=float, default=0)
+    parser.add_argument("--print-all", default=False, action="store_true")
+    args = parser.parse_args()
+
+    if args.model == "gtzan":
+        model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256/90-0.88")
+        labels = GTZANLabels
+    else:
+        model = tf.keras.models.load_model("/home/aleksy/checkpoints50-256-mixed-fma-100-0.0001/49-0.79")
+        labels = FMALabels
+    model.compile()
+
+    audio_path = args.file
+
+    warnings.filterwarnings(category=UserWarning, action="ignore")
+
+    if args.window == "multiple":
+        outputs = run_multiple_predictions(model, audio_path, fragment_duration=args.window_len,
+                                           window_interval=args.window_interval)
+        classes = mean_average_output(outputs, labels)
+    else:
+        outputs = run_single_prediction(model, audio_path, fragment_duration=args.window_len, offset_sec=args.offset)
+        classes = process_single_output(outputs, labels)
+
+    classes = sort_output_dict(classes)
+    print("Predicted genre: ", most_probable_class_from_class_dict(classes).capitalize())
+    if args.print_all:
+        print_output_dict(classes)
 

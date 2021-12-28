@@ -49,6 +49,21 @@ def mel_from_timeseries(audio_data: LibrosaMonoTimeseries,
     return mel_spec
 
 
+def spec_from_timeseries(audio_data: LibrosaMonoTimeseries,
+                        sr_overwrite: typing.Optional[int] = None,
+                        log_scale: bool = True
+                        ) -> typing.Any:
+
+    if sr_overwrite is not None:
+        sr = sr_overwrite
+    else:
+        sr = audio_data.sr
+    spec = librosa.stft(y=audio_data.timeseries)
+    if log_scale:
+        spec = librosa.core.power_to_db(spec, ref=np.max)
+    return spec
+
+
 def split_timeseries(audio_data: LibrosaMonoTimeseries,
                      fragment_duration_sec: float,
                      overlap_ratio: float = 0.50,

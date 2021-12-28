@@ -2,12 +2,22 @@ import matplotlib.pyplot
 from matplotlib import pyplot as plt
 import typing
 import librosa.display
+import json
 
 
 def mel_only_on_ax(mel: typing.Any, ax: plt.Axes) -> None:
     ax.clear()
     ax.axis("off")
     librosa.display.specshow(mel, ax=ax)
+
+
+def spec_only_on_ax(spec: typing.Any, ax: plt.Axes, log_freq: bool) -> None:
+    ax.clear()
+    ax.axis("off")
+    if log_freq:
+        librosa.display.specshow(spec, ax=ax, y_axis="log")
+    else:
+        librosa.display.specshow(spec, ax=ax, y_axis="hz")
 
 
 def save_mel_only(filepath: str, mel_data: typing.Any, dpi: int = 100) -> None:
@@ -53,9 +63,31 @@ def confusion_matrix():
     pass
 
 
-def training_history():
-    pass
+def training_history(history_json_path: str):
+    with open(history_json_path, "r") as f:
+        history = json.load(f)
+    train_acc = history["accuracy"]
+    train_loss = history["loss"]
+    val_acc = history["val_accuracy"]
+    val_loss = history["val_loss"]
 
+    fig, ax = plt.plot()
+    ax.plot(train_loss)
+    ax.plot(val_loss)
+    ax.set_title("Funkcja strat")
+    ax.set_ylabel("Wartość funkcji strat")
+    ax.set_xlabel("Epoka")
+    ax.legend(["Zbiór uczący", "Zbiór testowy"])
+    fig.show()
+
+    fig, ax = plt.plot()
+    ax.plot(train_acc)
+    ax.plot(val_acc)
+    ax.set_title("Dokładność modelu")
+    ax.set_ylabel("Dokładność")
+    ax.set_xlabel("Epoka")
+    ax.legend(["Zbiór uczący", "Zbiór testowy"])
+    fig.show()
 
 if __name__ == "__main__":
     pass
